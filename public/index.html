@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="José OS">
+<title>José · Performance OS</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07090d; --surface: #0d1017; --card: #111520;
+  --border: #1a2030; --border2: #242d3e;
+  --green: #00e676; --green-dim: rgba(0,230,118,0.12);
+  --yellow: #ffd600; --yellow-dim: rgba(255,214,0,0.12);
+  --red: #ff4444; --red-dim: rgba(255,68,68,0.12);
+  --blue: #40c4ff; --text: #e2e8f0; --text2: #8896aa;
+  --text3: #4a5568; --accent: #ffd600; --accent2: #ff6b35;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html { scroll-behavior:smooth; }
+body { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; min-height:100vh; overflow-x:hidden; }
+body::before {
+  content:''; position:fixed; inset:0;
+  background: radial-gradient(ellipse 80% 50% at 20% 0%,rgba(255,214,0,0.03) 0%,transparent 60%),
+              radial-gradient(ellipse 60% 40% at 80% 100%,rgba(0,180,255,0.03) 0%,transparent 60%);
+  pointer-events:none; z-index:0;
+}
+#pinScreen {
+  position:fixed; inset:0; background:var(--bg); z-index:1000;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:32px; padding:24px;
+}
+.pin-title { font-family:'Bebas Neue',sans-serif; font-size:52px; letter-spacing:4px; color:var(--accent); }
+.pin-sub { font-family:'DM Mono',monospace; font-size:11px; color:var(--text3); letter-spacing:3px; text-transform:uppercase; }
+.pin-dots { display:flex; gap:16px; }
+.pin-dot { width:14px; height:14px; border-radius:50%; border:2px solid var(--border2); transition:all 0.2s; }
+.pin-dot.filled { background:var(--accent); border-color:var(--accent); }
+.pin-pad { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; width:240px; }
+.pin-key {
+  aspect-ratio:1; background:var(--card); border:1px solid var(--border);
+  border-radius:12px; font-family:'Bebas Neue',sans-serif; font-size:28px;
+  color:var(--text); cursor:pointer; transition:all 0.15s;
+  display:flex; align-items:center; justify-content:center;
+}
+.pin-key:active { background:var(--border2); transform:scale(0.94); }
+.pin-key.del { font-size:18px; }
+.pin-error { font-family:'DM Mono',monospace; font-size:11px; color:var(--red); letter-spacing:1px; }
+nav {
+  position:fixed; bottom:0; left:0; right:0;
+  background:rgba(7,9,13,0.95); backdrop-filter:blur(20px);
+  border-top:1px solid var(--border); display:flex; z-index:100;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.nav-btn {
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:10px 4px; background:none; border:none; color:var(--text3); cursor:pointer;
+  transition:color 0.2s; font-family:'DM Mono',monospace;
+  font-size:9px; letter-spacing:1px; text-transform:uppercase; gap:4px;
+}
+.nav-btn.active { color:var(--accent); }
+.nav-btn svg { width:20px; height:20px; }
+.page { display:none; padding:20px 16px 100px; position:relative; z-index:1; }
+.page.active { display:block; }
+.page-header { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px; padding-top:8px; }
+.page-title { font-family:'Bebas Neue',sans-serif; font-size:40px; letter-spacing:2px; line-height:1; }
+.page-subtitle { font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); letter-spacing:2px; text-transform:uppercase; }
+.date-chip { font-family:'DM Mono',monospace; font-size:10px; color:var(--text2); background:var(--surface); border:1px solid var(--border); padding:5px 10px; border-radius:4px; letter-spacing:1px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:14px; }
+.card-label { font-family:'DM Mono',monospace; font-size:9px; letter-spacing:3px; color:var(--text3); text-transform:uppercase; margin-bottom:14px; }
+.conn-row { display:flex; gap:8px; margin-bottom:14px; }
+.conn-chip { flex:1; display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
+.conn-chip.connected { border-color:rgba(0,230,118,0.4); color:var(--green); background:var(--green-dim); }
+.conn-dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.recovery-ring-wrap { display:flex; align-items:center; gap:24px; margin-bottom:20px; }
+.ring-container { position:relative; width:110px; height:110px; flex-shrink:0; }
+.ring-svg { width:110px; height:110px; transform:rotate(-90deg); }
+.ring-track { fill:none; stroke:var(--border2); stroke-width:8; }
+.ring-fill { fill:none; stroke-width:8; stroke-linecap:round; transition:stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1),stroke 0.3s; }
+.ring-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.ring-val { font-family:'Bebas Neue',sans-serif; font-size:32px; line-height:1; }
+.ring-unit { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:1px; }
+.ring-stats { flex:1; }
+.stat-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--border); }
+.stat-row:last-child { border-bottom:none; }
+.stat-label { font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; }
+.stat-val { font-family:'Bebas Neue',sans-serif; font-size:20px; }
+.input-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+.inp-wrap { display:flex; flex-direction:column; gap:5px; }
+.inp-wrap label { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:2px; text-transform:uppercase; }
+.inp-wrap input,.inp-wrap select,.inp-wrap textarea { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:11px 12px; color:var(--text); font-family:'DM Mono',monospace; font-size:15px; outline:none; transition:border-color 0.2s; width:100%; -webkit-appearance:none; }
+.inp-wrap input:focus,.inp-wrap select:focus,.inp-wrap textarea:focus { border-color:var(--accent); }
+.inp-wrap select option { background:var(--card); }
+.inp-wrap textarea { resize:none; font-size:13px; line-height:1.5; }
+.inp-full { grid-column:1/-1; }
+.inp-prefilled input { border-color:rgba(0,230,118,0.3); color:var(--green); }
+.btn-primary { width:100%; background:var(--accent); color:#000; border:none; border-radius:10px; padding:15px; font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:3px; cursor:pointer; transition:all 0.2s; }
+.btn-primary:hover { filter:brightness(1.1); }
+.btn-primary:disabled { background:var(--text3); cursor:not-allowed; }
+.btn-secondary { width:100%; background:transparent; color:var(--text2); border:1px solid var(--border2); border-radius:10px; padding:13px; font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; cursor:pointer; transition:all 0.2s; margin-top:8px; }
+.training-pill { display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:8px; margin-bottom:14px; font-family:'DM Mono',monospace; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+.training-pill.green { background:var(--green-dim); border:1px solid rgba(0,230,118,0.3); color:var(--green); }
+.training-pill.yellow { background:var(--yellow-dim); border:1px solid rgba(255,214,0,0.3); color:var(--yellow); }
+.training-pill.red { background:var(--red-dim); border:1px solid rgba(255,68,68,0.3); color:var(--red); }
+.pill-dot { width:8px; height:8px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.ai-response { background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:16px; font-size:14px; line-height:1.75; color:#b0bec5; }
+.ai-response p { margin-bottom:10px; }
+.ai-response p:last-child { margin-bottom:0; }
+.ai-badge { display:inline-flex; align-items:center; gap:6px; background:rgba(255,214,0,0.1); border:1px solid rgba(255,214,0,0.2); border-radius:4px; padding:3px 8px; font-family:'DM Mono',monospace; font-size:9px; color:var(--accent); letter-spacing:2px; margin-bottom:10px; }
+.history-wrap { display:flex; gap:5px; align-items:flex-end; height:64px; margin:14px 0 6px; }
+.h-bar { flex:1; border-radius:3px 3px 0 0; min-height:4px; transition:all 0.4s; }
+.h-bar-empty { background:var(--border); }
+.h-bar-label { display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:1px; }
+.streak-row { display:flex; gap:10px; margin-top:14px; }
+.streak-chip { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center; }
+.streak-num { font-family:'Bebas Neue',sans-serif; font-size:32px; color:var(--accent); line-height:1; }
+.streak-lbl { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; margin-top:3px; }
+.loading { display:flex; gap:6px; align-items:center; padding:4px 0; }
+.ldot { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:ldot 1.2s ease-in-out infinite; }
+.ldot:nth-child(2) { animation-delay:0.2s; }
+.ldot:nth-child(3) { animation-delay:0.4s; }
+@keyframes ldot { 0%,100%{opacity:0.2;transform:scale(0.7)} 50%{opacity:1;transform:scale(1.2)} }
+.week-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin:14px 0; }
+.day-chip { aspect-ratio:1; border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:'DM Mono',monospace; font-size:8px; color:var(--text3); gap:2px; border:1px solid var(--border); background:var(--surface); }
+.day-chip .day-name { font-size:7px; text-transform:uppercase; }
+.day-chip .day-val { font-size:12px; font-weight:500; }
+.day-chip.green { background:var(--green-dim); border-color:rgba(0,230,118,0.3); color:var(--green); }
+.day-chip.yellow { background:var(--yellow-dim); border-color:rgba(255,214,0,0.3); color:var(--yellow); }
+.day-chip.red { background:var(--red-dim); border-color:rgba(255,68,68,0.3); color:var(--red); }
+.day-chip.empty { opacity:0.3; }
+.zone-bar { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.zone-label { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); width:50px; letter-spacing:1px; text-transform:uppercase; }
+.zone-track { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+.zone-fill { height:100%; border-radius:3px; }
+.zone-val { font-family:'DM Mono',monospace; font-size:10px; color:var(--text2); width:56px; text-align:right; }
+.ride-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
+.ride-name { font-size:14px; font-weight:500; margin-bottom:6px; }
+.ride-stats { display:flex; flex-wrap:wrap; gap:12px; }
+.ride-stat { font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); }
+.ride-stat span { color:var(--text2); font-size:12px; }
+.macro-ring-row { display:flex; gap:12px; margin:14px 0; }
+.macro-chip { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 10px; text-align:center; }
+.macro-val { font-family:'Bebas Neue',sans-serif; font-size:28px; line-height:1; }
+.macro-lbl { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; margin-top:3px; }
+.meal-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
+.meal-time { font-family:'DM Mono',monospace; font-size:9px; color:var(--accent); letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
+.meal-name { font-size:15px; font-weight:500; margin-bottom:4px; }
+.meal-macros { font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); }
+.progress-stat { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }
+.progress-stat:last-child { border-bottom:none; }
+.ps-label { font-family:'DM Mono',monospace; font-size:10px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; }
+.ps-val { font-family:'Bebas Neue',sans-serif; font-size:24px; }
+.ps-delta { font-family:'DM Mono',monospace; font-size:10px; margin-left:6px; }
+.ps-delta.good { color:var(--green); }
+.ps-delta.bad { color:var(--red); }
+.trend-line { height:60px; margin:14px 0; }
+.trend-line svg { width:100%; height:100%; }
+.divider { display:flex; align-items:center; gap:12px; margin:20px 0 16px; }
+.divider-line { flex:1; height:1px; background:var(--border); }
+.divider-label { font-family:'DM Mono',monospace; font-size:9px; color:var(--text3); letter-spacing:3px; text-transform:uppercase; white-space:nowrap; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+.fade-in { animation:fadeUp 0.4s ease forwards; }
+::-webkit-scrollbar { width:0; }
+</style>
+</head>
+<body>
+<div id="pinScreen">
+  <div style="text-align:center">
+    <div class="pin-title">JOSÉ OS</div>
+    <div class="pin-sub">Performance Coach</div>
+  </div>
+  <div class="pin-dots" id="pinDots">
+    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+  </div>
+  <div class="pin-error" id="pinError" style="visibility:hidden">Wrong PIN</div>
+  <div class="pin-pad">
+    <button class="pin-key" onclick="pinKey('1')">1</button><button class="pin-key" onclick="pinKey('2')">2</button><button class="pin-key" onclick="pinKey('3')">3</button>
+    <button class="pin-key" onclick="pinKey('4')">4</button><button class="pin-key" onclick="pinKey('5')">5</button><button class="pin-key" onclick="pinKey('6')">6</button>
+    <button class="pin-key" onclick="pinKey('7')">7</button><button class="pin-key" onclick="pinKey('8')">8</button><button class="pin-key" onclick="pinKey('9')">9</button>
+    <button class="pin-key" onclick="pinKey('')"></button><button class="pin-key" onclick="pinKey('0')">0</button><button class="pin-key del" onclick="pinDel()">⌫</button>
+  </div>
+</div>
+<div class="page active" id="page-checkin">
+  <div class="page-header"><div><div class="page-subtitle">Performance OS</div><div class="page-title">CHECK·IN</div></div><div class="date-chip" id="dateChip"></div></div>
+  <div class="conn-row"><div class="conn-chip" id="whoopChip" onclick="connectWhoop()"><div class="conn-dot"></div><span>WHOOP</span></div><div class="conn-chip" id="stravaChip" onclick="connectStrava()"><div class="conn-dot"></div><span>STRAVA</span></div></div>
+  <div id="whoopBanner" style="display:none" class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div><div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--green);margin-bottom:4px">⚡ WHOOP AUTO-FILLED</div><div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text2)" id="whoopBannerText"></div></div>
+      <button onclick="clearWhoopFill()" style="background:none;border:1px solid var(--border2);color:var(--text3);border-radius:6px;padding:6px 10px;font-family:'DM Mono',monospace;font-size:9px;cursor:pointer">CLEAR</button>
+    </div>
+  </div>
+  <div class="card" id="recoveryCard" style="display:none">
+    <div class="card-label">Today's Recovery</div>
+    <div class="recovery-ring-wrap">
+      <div class="ring-container">
+        <svg class="ring-svg" viewBox="0 0 110 110"><circle class="ring-track" cx="55" cy="55" r="46"/><circle class="ring-fill" id="ringFill" cx="55" cy="55" r="46" stroke-dasharray="289" stroke-dashoffset="289" stroke="var(--green)"/></svg>
+        <div class="ring-center"><div class="ring-val" id="ringVal">—</div><div class="ring-unit">RECOV</div></div>
+      </div>
+      <div class="ring-stats">
+        <div class="stat-row"><span class="stat-label">HRV</span><span class="stat-val" id="dispHrv" style="color:var(--blue)">—</span></div>
+        <div class="stat-row"><span class="stat-label">RHR</span><span class="stat-val" id="dispRhr">—</span></div>
+        <div class="stat-row"><span class="stat-label">Sleep</span><span class="stat-val" id="dispSleep">—</span></div>
+        <div class="stat-row"><span class="stat-label">Perf</span><span class="stat-val" id="dispSleepPerf">—</span></div>
+      </div>
+    </div>
+    <div id="trainingPillWrap"></div>
+    <div class="ai-badge">⚡ CLAUDE · MEMORY ACTIVE</div>
+    <div class="ai-response" id="aiResponse"><div class="loading"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div></div>
+  </div>
+  <div class="card" id="inputCard">
+    <div class="card-label">Whoop Data</div>
+    <div class="input-grid">
+      <div class="inp-wrap" id="wrapRecovery"><label>Recovery %</label><input type="number" id="iRecovery" placeholder="61" min="0" max="100" inputmode="numeric"/></div>
+      <div class="inp-wrap" id="wrapHrv"><label>HRV (ms)</label><input type="number" id="iHrv" placeholder="31" min="0" max="200" inputmode="numeric"/></div>
+      <div class="inp-wrap" id="wrapRhr"><label>Resting HR</label><input type="number" id="iRhr" placeholder="62" min="30" max="100" inputmode="numeric"/></div>
+      <div class="inp-wrap" id="wrapSleep"><label>Sleep hrs</label><input type="number" id="iSleep" placeholder="6.5" min="0" max="12" step="0.1" inputmode="decimal"/></div>
+      <div class="inp-wrap" id="wrapSleepPerf"><label>Sleep Perf %</label><input type="number" id="iSleepPerf" placeholder="85" min="0" max="100" inputmode="numeric"/></div>
+      <div class="inp-wrap"><label>Today's Session</label><select id="iSession"><option value="legs">Mon — Legs</option><option value="push">Tue — Push</option><option value="arms">Wed — Arms</option><option value="pull">Thu — Pull</option><option value="ftp">Fri — FTP/Indoor</option><option value="cycling">Sat — Cycling</option><option value="rest">Sun — Rest</option></select></div>
+      <div class="inp-wrap inp-full"><label>Notes</label><textarea id="iNotes" rows="2" placeholder="legs feeling heavy, 7hr sleep, stressful work day..."></textarea></div>
+    </div>
+    <button class="btn-primary" id="analyzeBtn" onclick="runCheckin()">ANALYZE MY DAY</button>
+  </div>
+  <div class="card">
+    <div class="card-label">7-Day Recovery</div>
+    <div class="history-wrap" id="historyBars"></div>
+    <div class="h-bar-label"><span>7 DAYS AGO</span><span>TODAY</span></div>
+    <div class="streak-row">
+      <div class="streak-chip"><div class="streak-num" id="streakGreen">—</div><div class="streak-lbl">Green streak</div></div>
+      <div class="streak-chip"><div class="streak-num" id="avgRecovery">—</div><div class="streak-lbl">7d avg %</div></div>
+      <div class="streak-chip"><div class="streak-num" id="totalLogs">—</div><div class="streak-lbl">Days logged</div></div>
+    </div>
+  </div>
+</div>
+<div class="page" id="page-weekly">
+  <div class="page-header"><div><div class="page-subtitle">Performance OS</div><div class="page-title">WEEKLY</div></div><div class="date-chip" id="weekChip"></div></div>
+  <div class="card"><div class="card-label">This Week</div><div class="week-grid" id="weekGrid"></div><div class="divider"><div class="divider-line"></div><div class="divider-label">AI Weekly Report</div><div class="divider-line"></div></div><button class="btn-primary" id="weeklyBtn" onclick="generateWeeklyReport()">GENERATE REPORT</button><div id="weeklyReport" style="margin-top:14px;display:none"><div class="ai-badge">⚡ WEEKLY ANALYSIS · MEMORY ACTIVE</div><div class="ai-response" id="weeklyContent"></div></div></div>
+  <div class="card"><div class="card-label">Training Adherence</div><div id="adherenceGrid" style="margin-top:4px"></div></div>
+</div>
+<div class="page" id="page-cycling">
+  <div class="page-header"><div><div class="page-subtitle">Performance OS</div><div class="page-title">CYCLING</div></div></div>
+  <div class="card"><div class="card-label">FTP & Power Zones</div><div class="input-grid"><div class="inp-wrap"><label>FTP (watts)</label><input type="number" id="iFtp" placeholder="Not tested" inputmode="numeric" onchange="updateZones()"/></div><div class="inp-wrap"><label>Max HR</label><input type="number" id="iMaxHr" placeholder="185" inputmode="numeric" onchange="updateZones()"/></div></div><div id="zonesDisplay" style="margin-top:8px"></div></div>
+  <div class="card"><div class="card-label">Recent Rides · Strava</div><div id="stravaRides"><div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-align:center;padding:16px">Connect Strava to see your rides</div></div></div>
+  <div class="card"><div class="card-label">Saturday Ride — Log & Plan</div><div class="input-grid"><div class="inp-wrap"><label>Distance (km)</label><input type="number" id="iRideDist" placeholder="45" inputmode="decimal"/></div><div class="inp-wrap"><label>Duration (min)</label><input type="number" id="iRideDur" placeholder="90" inputmode="numeric"/></div><div class="inp-wrap"><label>Avg HR</label><input type="number" id="iRideHr" placeholder="148" inputmode="numeric"/></div><div class="inp-wrap"><label>Elevation (m)</label><input type="number" id="iRideElev" placeholder="400" inputmode="numeric"/></div><div class="inp-wrap inp-full"><label>How did it feel?</label><select id="iRideFeel"><option value="easy">Easy — could do more</option><option value="moderate">Moderate — good effort</option><option value="hard">Hard — pushed it</option><option value="brutal">Brutal — emptied the tank</option></select></div></div><button class="btn-primary" onclick="generateCyclingPlan()">BUILD MY WEEK SESSIONS</button><div id="cyclingPlan" style="margin-top:14px;display:none"><div class="ai-badge">⚡ INDOOR SESSIONS</div><div class="ai-response" id="cyclingContent"></div></div></div>
+</div>
+<div class="page" id="page-nutrition">
+  <div class="page-header"><div><div class="page-subtitle">Performance OS</div><div class="page-title">NUTRITION</div></div></div>
+  <div class="card"><div class="card-label">Daily Targets</div><div class="macro-ring-row"><div class="macro-chip"><div class="macro-val" style="color:var(--green)" id="targetCals">2400</div><div class="macro-lbl">Calories</div></div><div class="macro-chip"><div class="macro-val" style="color:var(--blue)" id="targetProt">175g</div><div class="macro-lbl">Protein</div></div><div class="macro-chip"><div class="macro-val" style="color:var(--yellow)" id="targetCarbs">240g</div><div class="macro-lbl">Carbs</div></div><div class="macro-chip"><div class="macro-val" style="color:var(--accent2)" id="targetFat">65g</div><div class="macro-lbl">Fat</div></div></div><div class="input-grid"><div class="inp-wrap"><label>Day Type</label><select id="iDayType" onchange="updateTargets()"><option value="training">Training Day</option><option value="rest">Rest Day</option><option value="cycling">Cycling Day</option></select></div><div class="inp-wrap"><label>Food situation</label><select id="iAvailable"><option value="home">Cooking at home</option><option value="restaurant">Eating out</option><option value="mixed">Mixed</option></select></div></div><button class="btn-primary" onclick="generateMealPlan()">BUILD MY MEAL PLAN</button></div>
+  <div id="mealPlanWrap" style="display:none"><div class="card-label" style="padding:0 4px;margin-bottom:10px">TODAY'S PLAN</div><div id="mealCards"></div><div class="card" style="background:rgba(255,68,68,0.05);border-color:rgba(255,68,68,0.2)"><div class="card-label" style="color:var(--red)">⚠ CRAVING PROTOCOL</div><p style="font-size:13px;line-height:1.7;color:#b0bec5">Late night hit? Before you open that cabinet:<br><br>1. Drink 250ml water — wait 3 min<br>2. Eat your planned evening snack (Greek yogurt + berries)<br>3. Still craving? — 2 squares 85%+ dark chocolate only<br>4. Brush teeth immediately. It's a kill switch.<br><br><strong style="color:var(--text)">Remember:</strong> You train at 5:30am. What you eat at 10pm shows in tomorrow's recovery score.</p></div></div>
+</div>
+<div class="page" id="page-progress">
+  <div class="page-header"><div><div class="page-subtitle">Performance OS</div><div class="page-title">PROGRESS</div></div></div>
+  <div class="card"><div class="card-label">Log Today's Stats</div><div class="input-grid"><div class="inp-wrap"><label>Weight (lbs)</label><input type="number" id="iWeight" placeholder="175" inputmode="decimal" step="0.1"/></div><div class="inp-wrap"><label>Body Fat %</label><input type="number" id="iBf" placeholder="15" inputmode="decimal" step="0.1"/></div></div><button class="btn-primary" onclick="logProgress()">LOG STATS</button></div>
+  <div class="card"><div class="card-label">Body Composition</div><div id="progressStats"><div style="text-align:center;padding:20px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)">START LOGGING TO SEE TRENDS</div></div><div class="trend-line" id="trendLine" style="display:none"><svg id="trendSvg" viewBox="0 0 300 60" preserveAspectRatio="none"></svg></div></div>
+  <div class="card"><div class="card-label">Goal Tracker</div><div class="progress-stat"><div><div class="ps-label">Current Body Fat</div></div><div><span class="ps-val" id="goalCurrentBf">15%</span></div></div><div class="progress-stat"><div><div class="ps-label">Target Body Fat</div></div><div><span class="ps-val" style="color:var(--green)">11%</span></div></div><div class="progress-stat"><div><div class="ps-label">Fat to Lose</div></div><div><span class="ps-val" id="goalFatLose">6.2 lbs</span></div></div><div class="progress-stat"><div><div class="ps-label">Est. Timeline</div></div><div><span class="ps-val" style="color:var(--accent)">12–16 WKS</span></div></div><div style="margin-top:16px"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:1px">PROGRESS TO GOAL</span><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--text2)" id="goalPct">0%</span></div><div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden"><div id="goalBar" style="height:100%;background:linear-gradient(90deg,var(--yellow),var(--green));border-radius:4px;width:0%;transition:width 1s ease"></div></div></div></div>
+</div>
+<nav>
+  <button class="nav-btn active" onclick="showPage('checkin',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Check-in</button>
+  <button class="nav-btn" onclick="showPage('weekly',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Weekly</button>
+  <button class="nav-btn" onclick="showPage('cycling',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 0 0-1-1h-1l-3 6h5.5"/><path d="m12 6 1.5 6H5.5"/></svg>Cycling</button>
+  <button class="nav-btn" onclick="showPage('nutrition',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>Nutrition</button>
+  <button class="nav-btn" onclick="showPage('progress',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Progress</button>
+</nav>
+<script>
+let SESSION_TOKEN = localStorage.getItem('jos_token') || '';
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'x-session-token': SESSION_TOKEN } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (r.status === 401) { logout(); throw new Error('Unauthorized'); }
+  return r.json();
+}
+function logout() { localStorage.removeItem('jos_token'); SESSION_TOKEN = ''; document.getElementById('pinScreen').style.display = 'flex'; }
+let pinVal = '';
+function pinKey(d) { if (!d || pinVal.length >= 6) return; pinVal += d; renderPinDots(); if (pinVal.length === 6) submitPin(); }
+function pinDel() { pinVal = pinVal.slice(0, -1); renderPinDots(); document.getElementById('pinError').style.visibility = 'hidden'; }
+function renderPinDots() { document.querySelectorAll('.pin-dot').forEach((dot, i) => { dot.classList.toggle('filled', i < pinVal.length); }); }
+async function submitPin() {
+  try {
+    const d = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: pinVal }) }).then(r => r.json());
+    if (d.token) { SESSION_TOKEN = d.token; localStorage.setItem('jos_token', SESSION_TOKEN); document.getElementById('pinScreen').style.display = 'none'; initApp(); }
+    else { document.getElementById('pinError').style.visibility = 'visible'; pinVal = ''; renderPinDots(); }
+  } catch { document.getElementById('pinError').style.visibility = 'visible'; pinVal = ''; renderPinDots(); }
+}
+window.onload = async () => {
+  const d = new Date();
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('dateChip').textContent = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+  document.getElementById('weekChip').textContent = 'WK ' + getWeekNum(d);
+  document.getElementById('iSession').value = ['rest','legs','push','arms','pull','ftp','cycling'][d.getDay()];
+  const params = new URLSearchParams(location.search);
+  if (params.get('connected')) history.replaceState({}, '', '/');
+  if (SESSION_TOKEN) { try { await api('GET', '/api/status'); document.getElementById('pinScreen').style.display = 'none'; initApp(); } catch {} }
+};
+async function initApp() {
+  updateZones();
+  const savedFtp = localStorage.getItem('jos_ftp');
+  if (savedFtp) document.getElementById('iFtp').value = savedFtp;
+  await Promise.all([loadStatus(), loadHistory(), loadProgress(), loadStravaRides()]);
+  renderWeekGrid(); renderAdherence(); tryFillWhoop();
+}
+async function loadStatus() {
+  try {
+    const s = await api('GET', '/api/status');
+    const wc = document.getElementById('whoopChip'), sc = document.getElementById('stravaChip');
+    if (s.whoop_connected) { wc.classList.add('connected'); wc.querySelector('span').textContent = 'WHOOP ✓'; }
+    if (s.strava_connected) { sc.classList.add('connected'); sc.querySelector('span').textContent = 'STRAVA ✓'; }
+  } catch {}
+}
+function connectWhoop() { const wc = document.getElementById('whoopChip'); if (wc.classList.contains('connected')) return; window.location.href = `/api/whoop/connect?token=${SESSION_TOKEN}`; }
+function connectStrava() { const sc = document.getElementById('stravaChip'); if (sc.classList.contains('connected')) return; window.location.href = `/api/strava/connect?token=${SESSION_TOKEN}`; }
+async function tryFillWhoop() {
+  if (!document.getElementById('whoopChip').classList.contains('connected')) return;
+  try {
+    const d = await api('GET', '/api/whoop/today');
+    if (!d.connected) return;
+    const { recovery, sleep, cycle } = d;
+    let filled = [];
+    if (recovery.score != null) { setField('iRecovery', recovery.score, 'wrapRecovery'); filled.push(`Recovery ${recovery.score}%`); }
+    if (recovery.hrv != null) { setField('iHrv', recovery.hrv, 'wrapHrv'); filled.push(`HRV ${recovery.hrv}ms`); }
+    if (recovery.rhr != null) { setField('iRhr', recovery.rhr, 'wrapRhr'); filled.push(`RHR ${recovery.rhr}`); }
+    if (sleep.duration_hours != null) { setField('iSleep', sleep.duration_hours, 'wrapSleep'); filled.push(`Sleep ${sleep.duration_hours}h`); }
+    if (sleep.performance != null) { setField('iSleepPerf', sleep.performance, 'wrapSleepPerf'); }
+    if (filled.length) {
+      document.getElementById('whoopBanner').style.display = 'block';
+      const label = d.is_today ? 'Today' : `From ${d.data_date || 'most recent'}`;
+      document.getElementById('whoopBannerText').textContent = `${label}: ${filled.join(' · ')}${cycle?.strain ? ' · Strain ' + cycle.strain : ''}`;
+    }
+  } catch {}
+}
+function setField(id, val, wrapId) { document.getElementById(id).value = val; if (wrapId) document.getElementById(wrapId).classList.add('inp-prefilled'); }
+function clearWhoopFill() {
+  ['iRecovery','iHrv','iRhr','iSleep','iSleepPerf'].forEach(id => document.getElementById(id).value = '');
+  ['wrapRecovery','wrapHrv','wrapRhr','wrapSleep','wrapSleepPerf'].forEach(id => document.getElementById(id).classList.remove('inp-prefilled'));
+  document.getElementById('whoopBanner').style.display = 'none';
+}
+function getColor(v) { return v>=67?'var(--green)':v>=34?'var(--yellow)':'var(--red)'; }
+function getClass(v) { return v>=67?'green':v>=34?'yellow':'red'; }
+function getWeekNum(d) { const jan = new Date(d.getFullYear(),0,1); return Math.ceil((((d-jan)/86400000)+jan.getDay()+1)/7); }
+function showPage(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active'); btn.classList.add('active');
+  if (id === 'cycling') loadStravaRides();
+}
+async function runCheckin() {
+  const recovery = parseInt(document.getElementById('iRecovery').value);
+  if (!recovery) { alert('Enter your recovery % first'); return; }
+  const hrv = parseFloat(document.getElementById('iHrv').value) || null;
+  const rhr = parseInt(document.getElementById('iRhr').value) || null;
+  const sleep = parseFloat(document.getElementById('iSleep').value) || null;
+  const sleep_perf = parseInt(document.getElementById('iSleepPerf').value) || null;
+  const session_type = document.getElementById('iSession').value;
+  const notes = document.getElementById('iNotes').value;
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true; btn.textContent = 'ANALYZING...';
+  const rc = document.getElementById('recoveryCard'); rc.style.display = 'block'; rc.classList.add('fade-in');
+  document.getElementById('inputCard').style.display = 'none';
+  const pct = recovery / 100;
+  document.getElementById('ringFill').style.strokeDashoffset = 289 - pct * 289;
+  document.getElementById('ringFill').style.stroke = getColor(recovery);
+  document.getElementById('ringVal').textContent = recovery + '%'; document.getElementById('ringVal').style.color = getColor(recovery);
+  document.getElementById('dispHrv').textContent = hrv ? hrv + 'ms' : '—';
+  document.getElementById('dispRhr').textContent = rhr ? rhr + 'bpm' : '—';
+  document.getElementById('dispSleep').textContent = sleep ? sleep + 'h' : '—';
+  document.getElementById('dispSleepPerf').textContent = sleep_perf ? sleep_perf + '%' : '—';
+  const sessNames = { legs:'Legs',push:'Push Day',arms:'Arms',pull:'Pull Day',ftp:'FTP/Indoor',cycling:'Outdoor Cycling',rest:'Rest Day' };
+  const pillClass = recovery>=67?'green':recovery>=34?'yellow':'red';
+  const pillText = recovery>=67?`✓ GREEN — Full send on ${sessNames[session_type]||session_type}`:recovery>=34?`⚡ YELLOW — 80% intensity, protect joints`:`✗ RED — Rest or easy walk only`;
+  document.getElementById('trainingPillWrap').innerHTML = `<div class="training-pill ${pillClass}"><div class="pill-dot"></div>${pillText}</div>`;
+  document.getElementById('aiResponse').innerHTML = '<div class="loading"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div>';
+  try {
+    const d = await api('POST', '/api/checkin', { recovery, hrv, rhr, sleep, sleep_perf, session_type, notes });
+    const text = d.ai_response || '';
+    document.getElementById('aiResponse').innerHTML = text.split('\n\n').filter(p=>p.trim()).map(p=>`<p>${p}</p>`).join('') || '<p>Check-in saved.</p>';
+  } catch (e) { document.getElementById('aiResponse').innerHTML = `<p>Recovery ${recovery}% saved. (AI error: ${e.message})</p>`; }
+  await loadHistory(); btn.disabled = false; btn.textContent = 'ANALYZE MY DAY';
+}
+let cachedHistory = [];
+async function loadHistory() { try { cachedHistory = await api('GET', '/api/history'); renderHistory(); renderWeekGrid(); renderAdherence(); } catch {} }
+function renderHistory() {
+  const last7 = cachedHistory.slice(0, 7).reverse();
+  const padded = [...Array(Math.max(0, 7-last7.length)).fill(null), ...last7];
+  const container = document.getElementById('historyBars'); container.innerHTML = '';
+  padded.forEach(d => {
+    const bar = document.createElement('div'); bar.className = 'h-bar';
+    if (d) { bar.style.height = d.recovery+'%'; bar.style.background = getColor(d.recovery); }
+    else { bar.style.height = '4px'; bar.classList.add('h-bar-empty'); }
+    container.appendChild(bar);
+  });
+  let streak = 0; for (const h of cachedHistory) { if (h.recovery >= 67) streak++; else break; }
+  const avg7 = last7.length ? Math.round(last7.reduce((s,h)=>s+h.recovery,0)/last7.length) : 0;
+  document.getElementById('streakGreen').textContent = streak;
+  document.getElementById('avgRecovery').textContent = avg7 || '—';
+  document.getElementById('totalLogs').textContent = cachedHistory.length;
+}
+function renderWeekGrid() {
+  const dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'], today = new Date();
+  const grid = document.getElementById('weekGrid'); grid.innerHTML = '';
+  for (let i=6; i>=0; i--) {
+    const d = new Date(today); d.setDate(today.getDate()-i);
+    const dateStr = d.toISOString().split('T')[0];
+    const entry = cachedHistory.find(h => h.date === dateStr);
+    const chip = document.createElement('div'); chip.className = 'day-chip';
+    if (entry) { chip.classList.add(getClass(entry.recovery)); chip.innerHTML = `<span class="day-name">${dayNames[d.getDay()]}</span><span class="day-val">${entry.recovery}</span>`; }
+    else { chip.classList.add('empty'); chip.innerHTML = `<span class="day-name">${dayNames[d.getDay()]}</span><span class="day-val">—</span>`; }
+    grid.appendChild(chip);
+  }
+}
+function renderAdherence() {
+  const sessNames = { legs:'Legs',push:'Push',arms:'Arms',pull:'Pull',ftp:'FTP',cycling:'Cycling',rest:'Rest' };
+  const last7 = cachedHistory.slice(0,7);
+  const div = document.getElementById('adherenceGrid');
+  if (!last7.length) { div.innerHTML = '<p style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--text3);text-align:center;padding:16px">No data yet</p>'; return; }
+  div.innerHTML = last7.map(d => { const date = new Date(d.date+'T12:00:00'); const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return `<div class="progress-stat"><span class="ps-label">${days[date.getDay()]} — ${sessNames[d.session_type]||d.session_type}</span><span class="ps-val" style="color:${getColor(d.recovery)};font-size:18px">${d.recovery}%</span></div>`; }).join('');
+}
+async function generateWeeklyReport() {
+  const btn = document.getElementById('weeklyBtn'); btn.disabled = true; btn.textContent = 'GENERATING...';
+  document.getElementById('weeklyReport').style.display = 'block';
+  document.getElementById('weeklyContent').innerHTML = '<div class="loading"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div>';
+  try { const d = await api('POST', '/api/weekly', {}); document.getElementById('weeklyContent').innerHTML = (d.report||d.error||'').split('\n\n').filter(p=>p.trim()).map(p=>`<p>${p}</p>`).join(''); }
+  catch (e) { document.getElementById('weeklyContent').innerHTML = `<p>Error: ${e.message}</p>`; }
+  btn.disabled = false; btn.textContent = 'GENERATE REPORT';
+}
+function updateZones() {
+  const ftp = parseInt(document.getElementById('iFtp').value) || 0;
+  const maxHr = parseInt(document.getElementById('iMaxHr').value) || 185;
+  if (ftp) localStorage.setItem('jos_ftp', ftp);
+  const zones = ftp ? [
+    { name:'Z1', min:Math.round(ftp*0.55), max:Math.round(ftp*0.75), pct:15, color:'#40c4ff' },
+    { name:'Z2', min:Math.round(ftp*0.76), max:Math.round(ftp*0.90), pct:35, color:'#00e676' },
+    { name:'Z3', min:Math.round(ftp*0.91), max:Math.round(ftp*1.05), pct:55, color:'#ffd600' },
+    { name:'Z4', min:Math.round(ftp*1.06), max:Math.round(ftp*1.20), pct:75, color:'#ff6b35' },
+    { name:'Z5', min:Math.round(ftp*1.21), max:Math.round(ftp*1.50), pct:95, color:'#ff4444' },
+  ] : [
+    { name:'Z1', label:`${Math.round(maxHr*0.5)}–${Math.round(maxHr*0.6)}bpm`, pct:15, color:'#40c4ff' },
+    { name:'Z2', label:`${Math.round(maxHr*0.6)}–${Math.round(maxHr*0.7)}bpm`, pct:35, color:'#00e676' },
+    { name:'Z3', label:`${Math.round(maxHr*0.7)}–${Math.round(maxHr*0.8)}bpm`, pct:55, color:'#ffd600' },
+    { name:'Z4', label:`${Math.round(maxHr*0.8)}–${Math.round(maxHr*0.9)}bpm`, pct:75, color:'#ff6b35' },
+    { name:'Z5', label:`${Math.round(maxHr*0.9)}+bpm`, pct:95, color:'#ff4444' },
+  ];
+  document.getElementById('zonesDisplay').innerHTML = zones.map(z => `<div class="zone-bar"><span class="zone-label">${z.name}</span><div class="zone-track"><div class="zone-fill" style="width:${z.pct}%;background:${z.color}"></div></div><span class="zone-val" style="color:${z.color}">${ftp ? z.min+'–'+z.max+'w' : z.label}</span></div>`).join('');
+}
+async function loadStravaRides() {
+  if (!document.getElementById('stravaChip').classList.contains('connected')) return;
+  const container = document.getElementById('stravaRides');
+  container.innerHTML = '<div class="loading" style="padding:12px"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div>';
+  try {
+    const d = await api('GET', '/api/strava/recent');
+    if (!d.connected || !d.activities?.length) { container.innerHTML = '<p style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--text3);text-align:center;padding:16px">No rides found</p>'; return; }
+    container.innerHTML = d.activities.map(r => `<div class="ride-card fade-in"><div class="ride-name">${r.name}</div><div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--text3);margin-bottom:8px">${new Date(r.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div><div class="ride-stats"><div class="ride-stat">DIST <span>${r.distance_km}km</span></div><div class="ride-stat">TIME <span>${r.duration_min}min</span></div><div class="ride-stat">ELEV <span>${r.elevation_m}m</span></div>${r.avg_hr?`<div class="ride-stat">HR <span>${r.avg_hr}bpm</span></div>`:''} ${r.avg_watts?`<div class="ride-stat">AVG W <span>${r.avg_watts}w</span></div>`:''} ${r.weighted_avg_watts?`<div class="ride-stat">NP <span>${r.weighted_avg_watts}w</span></div>`:''} ${r.suffer_score?`<div class="ride-stat">SUFFER <span>${r.suffer_score}</span></div>`:''}</div></div>`).join('');
+    const latest = d.activities[0];
+    if (latest) { document.getElementById('iRideDist').value = latest.distance_km || ''; document.getElementById('iRideDur').value = latest.duration_min || ''; if (latest.avg_hr) document.getElementById('iRideHr').value = latest.avg_hr; if (latest.elevation_m) document.getElementById('iRideElev').value = latest.elevation_m; }
+  } catch (e) { container.innerHTML = `<p style="color:var(--red);font-family:'DM Mono',monospace;font-size:10px;padding:12px">Error: ${e.message}</p>`; }
+}
+async function generateCyclingPlan() {
+  document.getElementById('cyclingPlan').style.display = 'block';
+  document.getElementById('cyclingContent').innerHTML = '<div class="loading"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div>';
+  try {
+    const d = await api('POST', '/api/cycling', { dist: document.getElementById('iRideDist').value, dur: document.getElementById('iRideDur').value, hr: document.getElementById('iRideHr').value, elev: document.getElementById('iRideElev').value, feel: document.getElementById('iRideFeel').value, ftp: document.getElementById('iFtp').value });
+    document.getElementById('cyclingContent').innerHTML = (d.plan||d.error||'').split('\n\n').filter(p=>p.trim()).map(p=>`<p>${p}</p>`).join('');
+  } catch (e) { document.getElementById('cyclingContent').innerHTML = `<p>Error: ${e.message}</p>`; }
+}
+function updateTargets() {
+  const targets = { training:{cals:2400,prot:175,carbs:240,fat:65}, rest:{cals:2000,prot:175,carbs:170,fat:65}, cycling:{cals:2700,prot:175,carbs:310,fat:65} };
+  const t = targets[document.getElementById('iDayType').value] || targets.training;
+  document.getElementById('targetCals').textContent = t.cals; document.getElementById('targetProt').textContent = t.prot+'g'; document.getElementById('targetCarbs').textContent = t.carbs+'g'; document.getElementById('targetFat').textContent = t.fat+'g';
+}
+async function generateMealPlan() {
+  document.getElementById('mealPlanWrap').style.display = 'block';
+  document.getElementById('mealCards').innerHTML = '<div class="loading" style="padding:16px"><div class="ldot"></div><div class="ldot"></div><div class="ldot"></div></div>';
+  try {
+    const d = await api('POST', '/api/nutrition', { day_type: document.getElementById('iDayType').value, available: document.getElementById('iAvailable').value });
+    if (!d.meals?.length) throw new Error('No meal data');
+    document.getElementById('mealCards').innerHTML = d.meals.map(m => `<div class="meal-card fade-in"><div class="meal-time">${m.time}</div><div class="meal-name">${m.name}</div><div style="font-size:13px;color:var(--text2);margin:4px 0 6px;line-height:1.5">${m.foods}</div><div class="meal-macros">${m.protein}g protein</div></div>`).join('');
+  } catch { document.getElementById('mealCards').innerHTML = `<div class="meal-card"><div class="meal-time">7:00 AM</div><div class="meal-name">3 Eggs + Greek Yogurt</div><div class="meal-macros">~40g protein</div></div><div class="meal-card"><div class="meal-time">1:00 PM</div><div class="meal-name">Chicken breast + rice</div><div class="meal-macros">~50g protein</div></div><div class="meal-card"><div class="meal-time">7:00 PM</div><div class="meal-name">Steak + vegetables</div><div class="meal-macros">~50g protein</div></div><div class="meal-card"><div class="meal-time">9:00 PM</div><div class="meal-name">Greek yogurt + berries</div><div class="meal-macros">~20g protein</div></div>`; }
+}
+async function logProgress() {
+  const weight = parseFloat(document.getElementById('iWeight').value) || null;
+  const bf = parseFloat(document.getElementById('iBf').value) || null;
+  if (!weight && !bf) { alert('Enter weight or body fat'); return; }
+  await api('POST', '/api/progress', { weight, bf });
+  document.getElementById('iWeight').value = ''; document.getElementById('iBf').value = '';
+  await loadProgress();
+}
+async function loadProgress() { try { renderProgress(await api('GET', '/api/progress')); } catch {} }
+function renderProgress(progress) {
+  if (!progress?.length) return;
+  const latest = progress[progress.length-1], first = progress[0];
+  const wDelta = latest.weight && first.weight ? (latest.weight-first.weight).toFixed(1) : null;
+  const bDelta = latest.bf && first.bf ? (latest.bf-first.bf).toFixed(1) : null;
+  document.getElementById('progressStats').innerHTML = `<div class="progress-stat"><span class="ps-label">Weight</span><div style="display:flex;align-items:baseline"><span class="ps-val">${latest.weight||'—'} lbs</span>${wDelta!=null?`<span class="ps-delta ${parseFloat(wDelta)<0?'good':'bad'}">${parseFloat(wDelta)>0?'+':''}${wDelta}</span>`:''}</div></div><div class="progress-stat"><span class="ps-label">Body Fat</span><div style="display:flex;align-items:baseline"><span class="ps-val">${latest.bf||'—'}%</span>${bDelta!=null?`<span class="ps-delta ${parseFloat(bDelta)<0?'good':'bad'}">${parseFloat(bDelta)>0?'+':''}${bDelta}%</span>`:''}</div></div><div class="progress-stat"><span class="ps-label">Entries</span><span class="ps-val">${progress.length}</span></div>`;
+  if (latest.bf) {
+    document.getElementById('goalCurrentBf').textContent = latest.bf+'%';
+    const fatLbs = ((latest.bf-11)/100*(latest.weight||175)).toFixed(1);
+    document.getElementById('goalFatLose').textContent = Math.max(0,fatLbs)+' lbs';
+    const pct = Math.min(100,Math.max(0,Math.round((15-latest.bf)/(15-11)*100)));
+    document.getElementById('goalPct').textContent = pct+'%';
+    setTimeout(()=>{ document.getElementById('goalBar').style.width = pct+'%'; },100);
+  }
+  if (progress.length >= 2) {
+    const bfData = progress.filter(p=>p.bf).map(p=>p.bf);
+    if (bfData.length >= 2) {
+      document.getElementById('trendLine').style.display = 'block';
+      const min = Math.min(...bfData)-0.5, max = Math.max(...bfData)+0.5;
+      const pts = bfData.map((v,i) => `${(i/(bfData.length-1))*300},${60-((v-min)/(max-min))*55}`).join(' ');
+      document.getElementById('trendSvg').innerHTML = `<polyline points="${pts}" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="300" cy="${60-((bfData[bfData.length-1]-min)/(max-min))*55}" r="4" fill="var(--green)"/>`;
+    }
+  }
+}
+<\/script>
+</body>
+</html>
