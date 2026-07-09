@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ─── DATABASE ─────────────────────────────────────────────────────
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'performance.db');
 import fs from 'fs';
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -49,12 +50,14 @@ db.exec(`
   );
 `);
 
+// ─── ANTHROPIC ────────────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const AI_MODEL = 'claude-sonnet-4-6';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ─── AUTH MIDDLEWARE ──────────────────────────────────────────────
 function requireAuth(req, res, next) {
   const token = req.headers['x-session-token'];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
@@ -73,6 +76,7 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ token });
 });
 
+// ─── TOKEN HELPERS ────────────────────────────────────────────────
 function getTokens(provider) {
   return db.prepare('SELECT * FROM oauth_tokens WHERE provider = ?').get(provider);
 }
@@ -87,6 +91,7 @@ async function getValidWhoopToken() {
   const t = getTokens('whoop');
   if (!t) return null;
   if (Date.now() < t.expires_at - 120_000) return t.access_token;
+  // Refresh
   try {
     const r = await fetch('https://api.prod.whoop.com/oauth/oauth2/token', {
       method: 'POST',
@@ -128,6 +133,7 @@ async function getValidStravaToken() {
   } catch (e) { console.error('Strava refresh error:', e); return null; }
 }
 
+// Auto-bootstrap Strava from env refresh token on startup
 async function bootstrapStrava() {
   if (getTokens('strava')) return;
   const refresh_token = process.env.STRAVA_REFRESH_TOKEN;
@@ -156,6 +162,7 @@ async function bootstrapStrava() {
   }
 }
 
+// ─── WHOOP OAUTH ──────────────────────────────────────────────────
 app.get('/api/whoop/connect', requireAuth, (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.WHOOP_CLIENT_ID,
@@ -191,6 +198,7 @@ app.get('/api/whoop/callback', async (req, res) => {
   }
 });
 
+// ─── WHOOP DATA ───────────────────────────────────────────────────
 app.get('/api/whoop/today', requireAuth, async (req, res) => {
   const token = await getValidWhoopToken();
   if (!token) return res.json({ connected: false });
@@ -225,17 +233,23 @@ app.get('/api/whoop/today', requireAuth, async (req, res) => {
     data_date: recovDate || null,
     recovery: {
       score: recovery?.score?.recovery_score ?? null,
-      hrv: recovery?.score?.hrv_rmssd_milli != null ? Math.round(recovery.score.hrv_rmssd_milli) : null,
+      hrv: recovery?.score?.hrv_rmssd_milli != null
+        ? Math.round(recovery.score.hrv_rmssd_milli)
+        : null,
       rhr: recovery?.score?.resting_heart_rate ?? null,
       skin_temp_c: recovery?.score?.skin_temp_celsius ?? null,
     },
     sleep: {
-      duration_hours: sleep?.score?.total_in_bed_time_milli != null ? Math.round(sleep.score.total_in_bed_time_milli / 36000) / 100 : null,
+      duration_hours: sleep?.score?.total_in_bed_time_milli != null
+        ? Math.round(sleep.score.total_in_bed_time_milli / 36000) / 100
+        : null,
       performance: sleep?.score?.sleep_performance_percentage ?? null,
       disturbances: sleep?.score?.disturbances ?? null,
     },
     cycle: {
-      strain: cycle?.score?.strain != null ? Math.round(cycle.score.strain * 10) / 10 : null,
+      strain: cycle?.score?.strain != null
+        ? Math.round(cycle.score.strain * 10) / 10
+        : null,
       avg_hr: cycle?.score?.average_heart_rate ?? null,
       kilojoules: cycle?.score?.kilojoule ?? null,
       steps: null,
@@ -243,6 +257,7 @@ app.get('/api/whoop/today', requireAuth, async (req, res) => {
   });
 });
 
+// ─── STRAVA OAUTH ─────────────────────────────────────────────────
 app.get('/api/strava/connect', requireAuth, (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.STRAVA_CLIENT_ID,
@@ -278,16 +293,20 @@ app.get('/api/strava/callback', async (req, res) => {
   }
 });
 
+// ─── STRAVA DATA ──────────────────────────────────────────────────
 app.get('/api/strava/recent', requireAuth, async (req, res) => {
   const token = await getValidStravaToken();
   if (!token) return res.json({ connected: false, activities: [] });
+
   try {
     const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=10', {
       headers: { Authorization: `Bearer ${token}` },
     });
     const acts = await r.json();
     if (!Array.isArray(acts)) return res.json({ connected: true, activities: [] });
+
     const rides = acts.filter(a => a.type === 'Ride' || a.type === 'VirtualRide').slice(0, 5);
+
     const detailed = await Promise.all(
       rides.map(async (act) => {
         try {
@@ -295,22 +314,34 @@ app.get('/api/strava/recent', requireAuth, async (req, res) => {
             headers: { Authorization: `Bearer ${token}` },
           }).then(r => r.json());
           return {
-            id: act.id, name: act.name, date: act.start_date_local, type: act.type,
+            id: act.id,
+            name: act.name,
+            date: act.start_date_local,
+            type: act.type,
             distance_km: Math.round(act.distance / 100) / 10,
             duration_min: Math.round(act.moving_time / 60),
             elevation_m: Math.round(act.total_elevation_gain),
-            avg_hr: act.average_heartrate ?? null, max_hr: act.max_heartrate ?? null,
-            avg_watts: d.average_watts ?? null, max_watts: d.max_watts ?? null,
+            avg_hr: act.average_heartrate ?? null,
+            max_hr: act.max_heartrate ?? null,
+            avg_watts: d.average_watts ?? null,
+            max_watts: d.max_watts ?? null,
             weighted_avg_watts: d.weighted_average_watts ?? null,
-            suffer_score: act.suffer_score ?? null, calories: d.calories ?? null,
+            suffer_score: act.suffer_score ?? null,
+            calories: d.calories ?? null,
           };
-        } catch { return null; }
+        } catch {
+          return null;
+        }
       })
     );
+
     res.json({ connected: true, activities: detailed.filter(Boolean) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ─── STATUS ───────────────────────────────────────────────────────
 app.get('/api/status', requireAuth, (req, res) => {
   res.json({
     whoop_connected: !!getTokens('whoop'),
@@ -320,6 +351,150 @@ app.get('/api/status', requireAuth, (req, res) => {
   });
 });
 
+// ─── DASHBOARD AGGREGATE ──────────────────────────────────────────
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  const history = db.prepare('SELECT date, recovery, hrv, sleep, session_type FROM checkins ORDER BY created_at DESC LIMIT 30').all();
+  const latestCheckin = db.prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 1').get();
+  const latestProgress = db.prepare('SELECT * FROM progress ORDER BY created_at DESC LIMIT 1').get();
+  const progressHistory = db.prepare('SELECT date, weight, bf FROM progress ORDER BY created_at ASC LIMIT 52').all();
+
+  let whoopData = null;
+  const whoopToken = await getValidWhoopToken();
+  if (whoopToken) {
+    try {
+      async function whoopGet(path) {
+        const r = await fetch(`https://api.prod.whoop.com/developer/v1${path}`, {
+          headers: { Authorization: `Bearer ${whoopToken}` },
+        });
+        return r.ok ? r.json() : null;
+      }
+      const [recovData, sleepData, cycleData] = await Promise.all([
+        whoopGet('/recovery?limit=1'),
+        whoopGet('/sleep?limit=1'),
+        whoopGet('/cycle?limit=1'),
+      ]);
+      const recovery = recovData?.records?.[0];
+      const sleep = sleepData?.records?.[0];
+      const cycle = cycleData?.records?.[0];
+      const todayStr = new Date().toISOString().split('T')[0];
+      const recovDate = recovery?.created_at?.split('T')[0];
+      whoopData = {
+        is_today: recovDate === todayStr,
+        data_date: recovDate || null,
+        recovery: {
+          score: recovery?.score?.recovery_score ?? null,
+          hrv: recovery?.score?.hrv_rmssd_milli != null ? Math.round(recovery.score.hrv_rmssd_milli) : null,
+          rhr: recovery?.score?.resting_heart_rate ?? null,
+        },
+        sleep: {
+          duration_hours: sleep?.score?.total_in_bed_time_milli != null
+            ? Math.round(sleep.score.total_in_bed_time_milli / 36000) / 100 : null,
+          performance: sleep?.score?.sleep_performance_percentage ?? null,
+        },
+        cycle: {
+          strain: cycle?.score?.strain != null ? Math.round(cycle.score.strain * 10) / 10 : null,
+        },
+      };
+    } catch {}
+  }
+
+  let lastRide = null;
+  const stravaToken = await getValidStravaToken();
+  if (stravaToken) {
+    try {
+      const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=5', {
+        headers: { Authorization: `Bearer ${stravaToken}` },
+      });
+      const acts = await r.json();
+      const ride = Array.isArray(acts) ? acts.find(a => a.type === 'Ride' || a.type === 'VirtualRide') : null;
+      if (ride) {
+        const d = await fetch(`https://www.strava.com/api/v3/activities/${ride.id}`, {
+          headers: { Authorization: `Bearer ${stravaToken}` },
+        }).then(r => r.json());
+        lastRide = {
+          name: ride.name,
+          date: ride.start_date_local,
+          type: ride.type,
+          distance_km: Math.round(ride.distance / 100) / 10,
+          duration_min: Math.round(ride.moving_time / 60),
+          elevation_m: Math.round(ride.total_elevation_gain),
+          avg_hr: ride.average_heartrate ?? null,
+          avg_watts: d.average_watts ?? null,
+          weighted_avg_watts: d.weighted_average_watts ?? null,
+          max_watts: d.max_watts ?? null,
+        };
+      }
+    } catch {}
+  }
+
+  res.json({
+    history,
+    latestCheckin,
+    latestProgress,
+    progressHistory,
+    whoopData,
+    lastRide,
+    whoop_connected: !!getTokens('whoop'),
+    strava_connected: !!getTokens('strava'),
+  });
+});
+
+// ─── POWER CURVE ──────────────────────────────────────────────────
+app.get('/api/strava/power-curve', requireAuth, async (req, res) => {
+  const token = await getValidStravaToken();
+  if (!token) return res.json({ connected: false });
+
+  try {
+    const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=20', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const acts = await r.json();
+    const rides = Array.isArray(acts)
+      ? acts.filter(a => (a.type === 'Ride' || a.type === 'VirtualRide') && a.device_watts).slice(0, 5)
+      : [];
+
+    if (!rides.length) return res.json({ connected: true, curve: null, message: 'No power-meter rides found' });
+
+    const durations = [5, 10, 30, 60, 300, 600, 1200, 3600];
+    const bestPower = {};
+    durations.forEach(d => { bestPower[d] = 0; });
+
+    for (const ride of rides) {
+      try {
+        const sr = await fetch(
+          `https://www.strava.com/api/v3/activities/${ride.id}/streams?keys=watts&resolution=high`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const streams = await sr.json();
+        const wattsStream = Array.isArray(streams) ? streams.find(s => s.type === 'watts') : null;
+        if (!wattsStream?.data?.length) continue;
+
+        const watts = wattsStream.data;
+        for (const dur of durations) {
+          if (watts.length < dur) continue;
+          let windowSum = 0;
+          for (let i = 0; i < dur; i++) windowSum += (watts[i] || 0);
+          let maxAvg = windowSum / dur;
+          for (let i = dur; i < watts.length; i++) {
+            windowSum += (watts[i] || 0) - (watts[i - dur] || 0);
+            const avg = windowSum / dur;
+            if (avg > maxAvg) maxAvg = avg;
+          }
+          if (maxAvg > bestPower[dur]) bestPower[dur] = maxAvg;
+        }
+      } catch {}
+    }
+
+    res.json({
+      connected: true,
+      curve: durations.map(d => ({ duration: d, power: bestPower[d] > 0 ? Math.round(bestPower[d]) : null })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── CHECK-IN ─────────────────────────────────────────────────────
 const SESSION_NAMES = {
   legs: 'Legs — Mon hypertrophy (quads, hamstrings, glutes)',
   push: 'Push — Tue chest, shoulders, triceps',
@@ -333,74 +508,154 @@ const SESSION_NAMES = {
 function buildCoachingContext() {
   const history = db.prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 30').all();
   const progress = db.prepare('SELECT * FROM progress ORDER BY created_at DESC LIMIT 8').all();
+
   let histCtx = 'No previous check-ins yet.';
   if (history.length) {
     const avg = Math.round(history.reduce((s, h) => s + h.recovery, 0) / history.length);
-    const greenStreak = (() => { let s = 0; for (const h of history) { if (h.recovery >= 67) s++; else break; } return s; })();
+    const greenStreak = (() => {
+      let s = 0;
+      for (const h of history) { if (h.recovery >= 67) s++; else break; }
+      return s;
+    })();
     histCtx = `TRAINING HISTORY (last ${history.length} days, newest first):\n`
       + history.slice(0, 14).map(h =>
           `  ${h.date}: Recovery ${h.recovery}%${h.hrv ? ', HRV ' + h.hrv + 'ms' : ''}${h.rhr ? ', RHR ' + h.rhr : ''}${h.sleep ? ', Sleep ' + h.sleep + 'h' : ''}${h.sleep_perf ? '/' + h.sleep_perf + '%' : ''}, Session: ${h.session_type}${h.notes ? ' — "' + h.notes + '"' : ''}`
         ).join('\n')
       + `\n  30-day avg recovery: ${avg}%  |  Current green streak: ${greenStreak} days`;
   }
+
   let progCtx = '';
   if (progress.length) {
-    const latest = progress[0]; const first = progress[progress.length - 1];
+    const latest = progress[0];
+    const first = progress[progress.length - 1];
     progCtx = `\nBODY COMPOSITION TREND (${progress.length} entries):\n`
       + `  Latest: ${latest.weight || '?'}lbs, ${latest.bf || '?'}% BF (${latest.date})\n`
       + (progress.length > 1 ? `  Start: ${first.weight || '?'}lbs, ${first.bf || '?'}% BF (${first.date})` : '');
   }
+
   return { histCtx, progCtx };
 }
 
 app.post('/api/checkin', requireAuth, async (req, res) => {
   const { recovery, hrv, rhr, sleep, sleep_perf, session_type, notes, strain } = req.body;
   if (!recovery) return res.status(400).json({ error: 'Recovery % required' });
+
   const { histCtx, progCtx } = buildCoachingContext();
+
   const tier = recovery >= 67 ? 'GREEN' : recovery >= 34 ? 'YELLOW' : 'RED';
-  const prompt = `You are José's personal performance coach with full memory of his training history.\n\nATHLETE PROFILE:\n- José, 5'10", ~175lbs, ~15% body fat. Goal: reach 11-12% BF.\n- Busy dad (4 kids). Trains at 5:30am. Coach Francisco Jara's hypertrophy program: 3 exercises/day, train to failure.\n- Weekly split: Mon Legs, Tue Push, Wed Arms/Pull-ups, Thu Pull, Fri rest or FTP, Sat outdoor cycling, Sun rest.\n- Wahoo KICKR + Roovy for indoor. Biggest challenges: late-night sugar cravings, Netflix-induced sleep debt (<7hrs), vacation setbacks.\n- Eats eggs, chicken, red meat, Greek yogurt. Protein target: 175g/day.\n- Historical pattern: when sleep < 7h or HRV drops below 25ms, performance suffers next session.\n\n${histCtx}\n${progCtx}\n\nTODAY (${new Date().toISOString().split('T')[0]}):\n- Recovery: ${recovery}% → ${tier}\n- HRV: ${hrv || 'not provided'}ms\n- Resting HR: ${rhr || 'not provided'}bpm\n- Sleep: ${sleep || 'not provided'}h\n- Sleep performance: ${sleep_perf || 'not provided'}%\n- Strain (yesterday): ${strain || 'not provided'}\n- Planned session: ${SESSION_NAMES[session_type] || session_type}\n- Notes: "${notes || 'none'}"\n\nWrite a sharp, personal coaching note (130–160 words). Three tight paragraphs:\n1. What today's numbers mean — compare to his recent trend if you see a pattern worth calling out\n2. How to execute today's session given this recovery (be specific: RPE, rest periods, which exercises to protect or push)\n3. One concrete nutrition or sleep action for tonight that targets his biggest weakness\n\nTone: direct, warm, like a coach who knows him well. Use "José" once. No headers, no bullets. Reference specific numbers.`;
+
+  const prompt = `You are José's personal performance coach with full memory of his training history.
+
+ATHLETE PROFILE:
+- José, 5'10", ~175lbs, ~15% body fat. Goal: reach 11-12% BF.
+- Busy dad (4 kids). Trains at 5:30am. Coach Francisco Jara's hypertrophy program: 3 exercises/day, train to failure.
+- Weekly split: Mon Legs, Tue Push, Wed Arms/Pull-ups, Thu Pull, Fri rest or FTP, Sat outdoor cycling, Sun rest.
+- Wahoo KICKR + Roovy for indoor. Biggest challenges: late-night sugar cravings, Netflix-induced sleep debt (<7hrs), vacation setbacks.
+- Eats eggs, chicken, red meat, Greek yogurt. Protein target: 175g/day.
+- Historical pattern: when sleep < 7h or HRV drops below 25ms, performance suffers next session.
+
+${histCtx}
+${progCtx}
+
+TODAY (${new Date().toISOString().split('T')[0]}):
+- Recovery: ${recovery}% → ${tier}
+- HRV: ${hrv || 'not provided'}ms
+- Resting HR: ${rhr || 'not provided'}bpm
+- Sleep: ${sleep || 'not provided'}h
+- Sleep performance: ${sleep_perf || 'not provided'}%
+- Strain (yesterday): ${strain || 'not provided'}
+- Planned session: ${SESSION_NAMES[session_type] || session_type}
+- Notes: "${notes || 'none'}"
+
+Write a sharp, personal coaching note (130–160 words). Three tight paragraphs:
+1. What today's numbers mean — compare to his recent trend if you see a pattern worth calling out
+2. How to execute today's session given this recovery (be specific: RPE, rest periods, which exercises to protect or push)
+3. One concrete nutrition or sleep action for tonight that targets his biggest weakness
+
+Tone: direct, warm, like a coach who knows him well. Use "José" once. No headers, no bullets. Reference specific numbers.`;
+
   try {
-    const msg = await anthropic.messages.create({ model: AI_MODEL, max_tokens: 512, messages: [{ role: 'user', content: prompt }] });
+    const msg = await anthropic.messages.create({
+      model: AI_MODEL,
+      max_tokens: 512,
+      messages: [{ role: 'user', content: prompt }],
+    });
     const aiResponse = msg.content[0].text;
+
     const date = new Date().toISOString().split('T')[0];
-    db.prepare(`INSERT INTO checkins (date, recovery, hrv, rhr, sleep, sleep_perf, session_type, notes, strain, ai_response) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(date, recovery, hrv || null, rhr || null, sleep || null, sleep_perf || null, session_type, notes || null, strain || null, aiResponse);
+    db.prepare(`INSERT INTO checkins (date, recovery, hrv, rhr, sleep, sleep_perf, session_type, notes, strain, ai_response)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(date, recovery, hrv || null, rhr || null, sleep || null, sleep_perf || null,
+      session_type, notes || null, strain || null, aiResponse);
+
     res.json({ ok: true, ai_response: aiResponse });
-  } catch (e) { console.error('Claude error:', e); res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    console.error('Claude error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ─── WEEKLY REPORT ────────────────────────────────────────────────
 app.post('/api/weekly', requireAuth, async (req, res) => {
   const history = db.prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 7').all();
   if (!history.length) return res.status(400).json({ error: 'No check-in data yet' });
+
   const avg = Math.round(history.reduce((s, h) => s + h.recovery, 0) / history.length);
   const greenDays = history.filter(h => h.recovery >= 67).length;
-  const dataStr = history.map(h => `${h.date}: Recovery ${h.recovery}%${h.hrv ? ', HRV ' + h.hrv + 'ms' : ''}${h.rhr ? ', RHR ' + h.rhr : ''}${h.sleep ? ', Sleep ' + h.sleep + 'h' : ''}, Session: ${h.session_type}${h.notes ? ' — "' + h.notes + '"' : ''}`).join('\n');
+  const dataStr = history.map(h =>
+    `${h.date}: Recovery ${h.recovery}%${h.hrv ? ', HRV ' + h.hrv + 'ms' : ''}${h.rhr ? ', RHR ' + h.rhr : ''}${h.sleep ? ', Sleep ' + h.sleep + 'h' : ''}, Session: ${h.session_type}${h.notes ? ' — "' + h.notes + '"' : ''}`
+  ).join('\n');
+
   const { progCtx } = buildCoachingContext();
+
   try {
-    const msg = await anthropic.messages.create({ model: AI_MODEL, max_tokens: 600, messages: [{ role: 'user', content: `Weekly coaching report for José (5'10", ~175lbs, goal 11-12% BF, busy dad training at 5:30am).\n\nWEEK DATA:\n${dataStr}\nAvg recovery: ${avg}%  |  Green days: ${greenDays}/7\n${progCtx}\n\nWrite a 200-word report (flowing paragraphs, no headers): recovery trend + what it means, training quality, one thing he did well, one specific thing to fix, next week's priority. Be specific with numbers.` }] });
+    const msg = await anthropic.messages.create({
+      model: AI_MODEL,
+      max_tokens: 600,
+      messages: [{ role: 'user', content: `Weekly coaching report for José (5'10", ~175lbs, goal 11-12% BF, busy dad training at 5:30am).\n\nWEEK DATA:\n${dataStr}\nAvg recovery: ${avg}%  |  Green days: ${greenDays}/7\n${progCtx}\n\nWrite a 200-word report (flowing paragraphs, no headers): recovery trend + what it means, training quality, one thing he did well, one specific thing to fix, next week's priority. Be specific with numbers.` }],
+    });
     res.json({ ok: true, report: msg.content[0].text });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ─── CYCLING PLAN ─────────────────────────────────────────────────
 app.post('/api/cycling', requireAuth, async (req, res) => {
   const { dist, dur, hr, elev, feel, ftp } = req.body;
+
   let stravaCtx = '';
   const stravaToken = await getValidStravaToken();
   if (stravaToken) {
     try {
-      const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=3', { headers: { Authorization: `Bearer ${stravaToken}` } });
+      const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=3', {
+        headers: { Authorization: `Bearer ${stravaToken}` },
+      });
       const acts = await r.json();
       const rides = Array.isArray(acts) ? acts.filter(a => a.type === 'Ride' || a.type === 'VirtualRide') : [];
-      if (rides.length) stravaCtx = `Recent Strava rides:\n` + rides.map(r => `  ${r.start_date_local?.split('T')[0]}: ${Math.round(r.distance/1000)}km, ${Math.round(r.moving_time/60)}min, ${r.average_heartrate || '?'}bpm avg HR`).join('\n');
+      if (rides.length) {
+        stravaCtx = `Recent Strava rides:\n` + rides.map(r =>
+          `  ${r.start_date_local?.split('T')[0]}: ${Math.round(r.distance/1000)}km, ${Math.round(r.moving_time/60)}min, ${r.average_heartrate || '?'}bpm avg HR`
+        ).join('\n');
+      }
     } catch {}
   }
+
   const latest = db.prepare('SELECT recovery FROM checkins ORDER BY created_at DESC LIMIT 1').get();
+
   try {
-    const msg = await anthropic.messages.create({ model: AI_MODEL, max_tokens: 500, messages: [{ role: 'user', content: `Cycling coach for José. Recreational cyclist improving Saturday outdoor performance. Wahoo KICKR + Roovy for indoor. ${ftp ? 'FTP: ' + ftp + 'w.' : 'No FTP tested yet.'} ${latest ? 'Latest recovery: ' + latest.recovery + '%.' : ''}\n\n${stravaCtx}\n\nSaturday ride just completed: ${dist || '?'}km, ${dur || '?'}min, avg HR ${hr || '?'}bpm, ${elev || '?'}m elevation, felt: ${feel}.\n\nDesign 2 indoor sessions (Wednesday easy + Friday structured). Each: duration, type, specific intervals with HR zone or watt target, session goal. Practical. 180 words max.` }] });
+    const msg = await anthropic.messages.create({
+      model: AI_MODEL,
+      max_tokens: 500,
+      messages: [{ role: 'user', content: `Cycling coach for José. Recreational cyclist improving Saturday outdoor performance. Wahoo KICKR + Roovy. ${ftp ? 'FTP: ' + ftp + 'w.' : 'No FTP tested yet.'} ${latest ? 'Latest recovery: ' + latest.recovery + '%.' : ''}\n\n${stravaCtx}\n\nSaturday ride just completed: ${dist || '?'}km, ${dur || '?'}min, avg HR ${hr || '?'}bpm, ${elev || '?'}m elevation, felt: ${feel}.\n\nDesign 2 indoor sessions (Wednesday easy + Friday structured). Each: duration, type, specific intervals with HR zone or watt target, session goal. Practical. 180 words max.` }],
+    });
     res.json({ ok: true, plan: msg.content[0].text });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ─── NUTRITION ────────────────────────────────────────────────────
 const NUTRITION_TARGETS = {
   training: { cals: 2400, prot: 175, carbs: 240, fat: 65 },
   rest: { cals: 2000, prot: 175, carbs: 170, fat: 65 },
@@ -412,14 +667,25 @@ app.post('/api/nutrition', requireAuth, async (req, res) => {
   const t = NUTRITION_TARGETS[day_type] || NUTRITION_TARGETS.training;
   const latest = db.prepare('SELECT recovery FROM checkins ORDER BY created_at DESC LIMIT 1').get();
   const availLabel = { home: 'cooking at home', restaurant: 'eating out', mixed: 'mix of home and eating out' }[available] || available;
+
   try {
-    const msg = await anthropic.messages.create({ model: AI_MODEL, max_tokens: 600, system: 'Return only a valid JSON array. No markdown fences, no explanation, no extra text.', messages: [{ role: 'user', content: `Meal plan for José. ${t.cals} cal ${day_type} day. Target: 175g protein. ${availLabel}. Foods he eats: eggs, chicken, red meat (steak/ground beef), Greek yogurt, rice, oats, fruit. ${latest ? 'Recovery today: ' + latest.recovery + '%.' : ''} Late-night cravings are his biggest risk — the evening snack must be planned.\n\nReturn JSON array of 5 meals: [{time: "7:00 AM", name: "...", foods: "...", protein: 40}]\nMeals must total ~175g protein. Be specific with portions.` }] });
+    const msg = await anthropic.messages.create({
+      model: AI_MODEL,
+      max_tokens: 600,
+      system: 'Return only a valid JSON array. No markdown fences, no explanation, no extra text.',
+      messages: [{ role: 'user', content: `Meal plan for José. ${t.cals} cal ${day_type} day. Target: 175g protein. ${availLabel}. Foods he eats: eggs, chicken, red meat (steak/ground beef), Greek yogurt, rice, oats, fruit. ${latest ? 'Recovery today: ' + latest.recovery + '%.' : ''} Late-night cravings are his biggest risk — the evening snack must be planned.\n\nReturn JSON array of 5 meals: [{time: "7:00 AM", name: "...", foods: "...", protein: 40}]\nMeals must total ~175g protein. Be specific with portions.` }],
+    });
     const raw = msg.content[0].text.replace(/```json|```/g, '').trim();
-    let meals; try { meals = JSON.parse(raw); } catch { meals = []; }
+    let meals;
+    try { meals = JSON.parse(raw); }
+    catch { meals = []; }
     res.json({ ok: true, meals, targets: t });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ─── HISTORY & PROGRESS ───────────────────────────────────────────
 app.get('/api/history', requireAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 60').all());
 });
@@ -436,6 +702,7 @@ app.get('/api/progress', requireAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM progress ORDER BY created_at ASC LIMIT 52').all());
 });
 
+// ─── START ────────────────────────────────────────────────────────
 bootstrapStrava().then(() => {
   app.listen(PORT, () => console.log(`Performance OS v2 running on port ${PORT}`));
 });
