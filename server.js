@@ -60,7 +60,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── AUTH MIDDLEWARE ──────────────────────────────────────────────
 async function requireAuth(req, res, next) {
-  const token = req.headers['x-session-token'];
+  const token = req.headers['x-session-token'] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   const r = await db.execute({ sql: 'SELECT token FROM sessions WHERE token = ?', args: [token] });
   if (!r.rows.length) return res.status(401).json({ error: 'Unauthorized' });
