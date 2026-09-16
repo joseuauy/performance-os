@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup — Performance OS</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #2a313c;
+    --text: #e6edf3; --muted: #8b949e; --accent: #3fb950; --danger: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 5px; }
+  input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: #0d1117; color: var(--text); font: 13px ui-monospace, Menlo, Consolas, monospace;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%; padding: 13px; margin-top: 20px; border: 0; border-radius: 8px;
+    background: var(--accent); color: #04260d; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: default; }
+  .status { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+  .status.ok { background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.4); }
+  .status.bad { background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
+  code {
+    font: 12px ui-monospace, Menlo, Consolas, monospace; background: #0d1117;
+    border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; word-break: break-all;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Setup</h1>
+  <p class="sub">Paste your keys below. They're saved to a local <code>.env</code> file on this computer only — never uploaded or committed.</p>
+
+  <div id="status" class="status">Checking…</div>
+
+  <form id="form">
+    <div class="card">
+      <h2>Claude</h2>
+      <label for="ANTHROPIC_API_KEY">Anthropic API key</label>
+      <input id="ANTHROPIC_API_KEY" name="ANTHROPIC_API_KEY" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
+      <div class="hint">From console.anthropic.com → API keys</div>
+    </div>
+
+    <div class="card">
+      <h2>WHOOP</h2>
+      <label for="WHOOP_CLIENT_ID">Client ID</label>
+      <input id="WHOOP_CLIENT_ID" name="WHOOP_CLIENT_ID" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false">
+      <label for="WHOOP_CLIENT_SECRET">Client secret</label>
+      <input id="WHOOP_CLIENT_SECRET" name="WHOOP_CLIENT_SECRET" autocomplete="off" spellcheck="false">
+      <div class="hint">
+        In the WHOOP developer portal, this exact redirect URL must be registered:<br>
+        <code id="whoopRedirect">…</code>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Strava <span style="text-transform:none;letter-spacing:0">(optional)</span></h2>
+      <label for="STRAVA_CLIENT_ID">Client ID</label>
+      <input id="STRAVA_CLIENT_ID" name="STRAVA_CLIENT_ID" autocomplete="off" spellcheck="false">
+      <label for="STRAVA_CLIENT_SECRET">Client secret</label>
+      <input id="STRAVA_CLIENT_SECRET" name="STRAVA_CLIENT_SECRET" autocomplete="off" spellcheck="false">
+      <div class="hint">
+        Strava redirect URL:<br>
+        <code id="stravaRedirect">…</code>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>App</h2>
+      <label for="APP_PIN">PIN</label>
+      <input id="APP_PIN" name="APP_PIN" placeholder="832683" autocomplete="off" spellcheck="false">
+    </div>
+
+    <button type="submit" id="save">Save and continue</button>
+  </form>
+</div>
+
+<script>
+const FIELDS = ['ANTHROPIC_API_KEY','WHOOP_CLIENT_ID','WHOOP_CLIENT_SECRET','STRAVA_CLIENT_ID','STRAVA_CLIENT_SECRET','APP_PIN'];
+const statusEl = document.getElementById('status');
+
+async function refresh() {
+  const r = await fetch('/api/config-status');
+  const d = await r.json();
+
+  document.getElementById('whoopRedirect').textContent = d.redirect_uris.whoop;
+  document.getElementById('stravaRedirect').textContent = d.redirect_uris.strava;
+
+  // Show what's already stored so you only fill the gaps.
+  if (d.values.WHOOP_CLIENT_ID) document.getElementById('WHOOP_CLIENT_ID').value = d.values.WHOOP_CLIENT_ID;
+  if (d.values.STRAVA_CLIENT_ID) document.getElementById('STRAVA_CLIENT_ID').value = d.values.STRAVA_CLIENT_ID;
+  for (const k of ['ANTHROPIC_API_KEY','WHOOP_CLIENT_SECRET','STRAVA_CLIENT_SECRET']) {
+    if (d.values[k]) document.getElementById(k).placeholder = 'saved: ' + d.values[k] + ' (leave blank to keep)';
+  }
+
+  if (d.configured) {
+    statusEl.className = 'status ok';
+    statusEl.innerHTML = 'Configured — reading <code>' + (d.env_file || '.env') + '</code>. <a href="/">Go to dashboard</a>';
+  } else {
+    statusEl.className = 'status bad';
+    statusEl.innerHTML = 'Not configured yet. Missing: <code>' + d.missing.join('</code> <code>') + '</code>';
+  }
+}
+
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('save');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const payload = {};
+  for (const k of FIELDS) {
+    const v = document.getElementById(k).value.trim();
+    if (v) payload[k] = v;
+  }
+
+  try {
+    const r = await fetch('/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Save failed');
+
+    for (const k of FIELDS) document.getElementById(k).value = '';
+    await refresh();
+
+    if (d.configured) {
+      btn.textContent = 'Saved — opening dashboard…';
+      setTimeout(() => { window.location.href = '/'; }, 700);
+      return;
+    }
+    btn.textContent = 'Save and continue';
+    btn.disabled = false;
+  } catch (err) {
+    statusEl.className = 'status bad';
+    statusEl.textContent = err.message;
+    btn.textContent = 'Save and continue';
+    btn.disabled = false;
+  }
+});
+
+refresh();
+</script>
+</body>
+</html>

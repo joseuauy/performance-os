@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@libsql/client';
 import express from 'express';
@@ -8,8 +8,38 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ENV_PATH = path.join(__dirname, '.env');
+
+// Windows editors happily save ".env" as ".env.txt", and PowerShell redirects
+// default to UTF-16 — both silently yield undefined config. Handle all of it.
+function readTextSmart(file) {
+  const buf = fs.readFileSync(file);
+  if (buf[0] === 0xff && buf[1] === 0xfe) return buf.toString('utf16le').replace(/^﻿/, '');
+  if (buf[0] === 0xfe && buf[1] === 0xff) return Buffer.from(buf).swap16().toString('utf16le').replace(/^﻿/, '');
+  return buf.toString('utf8').replace(/^﻿/, '');
+}
+
+let loadedEnvFrom = null;
+function loadEnvFile() {
+  for (const name of ['.env', '.env.txt', '.env.local']) {
+    const p = path.join(__dirname, name);
+    if (!fs.existsSync(p)) continue;
+    const parsed = dotenv.parse(readTextSmart(p));
+    for (const [k, v] of Object.entries(parsed)) process.env[k] = String(v).trim();
+    loadedEnvFrom = name;
+    return name;
+  }
+  return null;
+}
+loadEnvFile();
+
+const REQUIRED_KEYS = ['ANTHROPIC_API_KEY', 'WHOOP_CLIENT_ID', 'WHOOP_CLIENT_SECRET'];
+const missingKeys = () => REQUIRED_KEYS.filter(k => !process.env[k]);
+const isConfigured = () => missingKeys().length === 0;
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+const baseUrl = () => process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // ─── DATABASE ─────────────────────────────────────────────────────
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'performance.db');
@@ -53,11 +83,95 @@ await db.executeMultiple(`
 `);
 
 // ─── ANTHROPIC ────────────────────────────────────────────────────
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const AI_MODEL = 'claude-sonnet-4-6';
+let _anthropic = null;
+let _anthropicKey = null;
+function ai() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('ANTHROPIC_API_KEY is not set. Open /setup.html to add it.');
+  if (!_anthropic || _anthropicKey !== key) {
+    _anthropic = new Anthropic({ apiKey: key });
+    _anthropicKey = key;
+  }
+  return _anthropic;
+}
 
 app.use(express.json());
+
+// Send an unconfigured app to the setup page instead of failing mysteriously later.
+app.use((req, res, next) => {
+  if (!isConfigured() && (req.path === '/' || req.path === '/index.html')) {
+    return res.redirect('/setup.html');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── SETUP ────────────────────────────────────────────────────────
+const SETUP_KEYS = [
+  'ANTHROPIC_API_KEY', 'WHOOP_CLIENT_ID', 'WHOOP_CLIENT_SECRET',
+  'STRAVA_CLIENT_ID', 'STRAVA_CLIENT_SECRET', 'STRAVA_REFRESH_TOKEN',
+  'APP_PIN', 'BASE_URL', 'PORT',
+];
+
+function isLocalRequest(req) {
+  const ip = req.socket.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+app.get('/api/config-status', (req, res) => {
+  const mask = v => (v ? `${String(v).slice(0, 6)}…${String(v).slice(-4)}` : null);
+  res.json({
+    configured: isConfigured(),
+    missing: missingKeys(),
+    env_file: loadedEnvFrom,
+    redirect_uris: {
+      whoop: `${baseUrl()}/api/whoop/callback`,
+      strava: `${baseUrl()}/api/strava/callback`,
+    },
+    values: {
+      ANTHROPIC_API_KEY: mask(process.env.ANTHROPIC_API_KEY),
+      WHOOP_CLIENT_ID: process.env.WHOOP_CLIENT_ID || null,
+      WHOOP_CLIENT_SECRET: mask(process.env.WHOOP_CLIENT_SECRET),
+      STRAVA_CLIENT_ID: process.env.STRAVA_CLIENT_ID || null,
+      STRAVA_CLIENT_SECRET: mask(process.env.STRAVA_CLIENT_SECRET),
+      BASE_URL: baseUrl(),
+    },
+  });
+});
+
+app.post('/api/setup', (req, res) => {
+  if (!isLocalRequest(req)) return res.status(403).json({ error: 'Setup is only available from this computer.' });
+
+  const incoming = {};
+  for (const k of SETUP_KEYS) {
+    const v = req.body?.[k];
+    if (typeof v === 'string' && v.trim()) incoming[k] = v.trim();
+  }
+
+  const merged = {};
+  for (const k of SETUP_KEYS) {
+    if (process.env[k]) merged[k] = process.env[k];
+  }
+  Object.assign(merged, incoming);
+
+  merged.APP_PIN ||= '832683';
+  merged.PORT ||= String(PORT);
+  merged.BASE_URL ||= `http://localhost:${merged.PORT}`;
+
+  const body = SETUP_KEYS.filter(k => merged[k] != null).map(k => `${k}=${merged[k]}`).join('\n') + '\n';
+  fs.writeFileSync(ENV_PATH, body, 'utf8');
+
+  // A stray .env.txt would shadow nothing but confuses the next reader — retire it.
+  const stray = path.join(__dirname, '.env.txt');
+  if (fs.existsSync(stray)) fs.renameSync(stray, `${stray}.bak`);
+
+  loadedEnvFrom = '.env';
+  for (const [k, v] of Object.entries(merged)) process.env[k] = v;
+
+  res.json({ ok: true, configured: isConfigured(), missing: missingKeys() });
+});
 
 // ─── AUTH MIDDLEWARE ──────────────────────────────────────────────
 async function requireAuth(req, res, next) {
@@ -166,10 +280,20 @@ async function bootstrapStrava() {
 }
 
 // ─── WHOOP OAUTH ──────────────────────────────────────────────────
+function notConfigured(res, provider, keys) {
+  return res.status(503).send(
+    `<h2>${provider} is not configured</h2>` +
+    `<p>Missing: <code>${keys.join(', ')}</code></p>` +
+    `<p><a href="/setup.html">Open setup</a> to add your credentials.</p>`
+  );
+}
+
 app.get('/api/whoop/connect', requireAuth, (req, res) => {
+  const missing = ['WHOOP_CLIENT_ID', 'WHOOP_CLIENT_SECRET'].filter(k => !process.env[k]);
+  if (missing.length) return notConfigured(res, 'WHOOP', missing);
   const params = new URLSearchParams({
     client_id: process.env.WHOOP_CLIENT_ID,
-    redirect_uri: `${process.env.BASE_URL}/api/whoop/callback`,
+    redirect_uri: `${baseUrl()}/api/whoop/callback`,
     response_type: 'code',
     scope: 'read:recovery read:cycles read:sleep read:workout read:profile read:body_measurement offline',
     state: 'whoop',
@@ -189,7 +313,7 @@ app.get('/api/whoop/callback', async (req, res) => {
         code,
         client_id: process.env.WHOOP_CLIENT_ID,
         client_secret: process.env.WHOOP_CLIENT_SECRET,
-        redirect_uri: `${process.env.BASE_URL}/api/whoop/callback`,
+        redirect_uri: `${baseUrl()}/api/whoop/callback`,
       }),
     });
     const d = await r.json();
@@ -254,9 +378,11 @@ app.get('/api/whoop/today', requireAuth, async (req, res) => {
 
 // ─── STRAVA OAUTH ─────────────────────────────────────────────────
 app.get('/api/strava/connect', requireAuth, (req, res) => {
+  const missing = ['STRAVA_CLIENT_ID', 'STRAVA_CLIENT_SECRET'].filter(k => !process.env[k]);
+  if (missing.length) return notConfigured(res, 'Strava', missing);
   const params = new URLSearchParams({
     client_id: process.env.STRAVA_CLIENT_ID,
-    redirect_uri: `${process.env.BASE_URL}/api/strava/callback`,
+    redirect_uri: `${baseUrl()}/api/strava/callback`,
     response_type: 'code',
     scope: 'read,activity:read_all',
     approval_prompt: 'auto',
@@ -522,7 +648,7 @@ app.post('/api/checkin', requireAuth, async (req, res) => {
   const prompt = `You are José's personal performance coach with full memory of his training history.\n\nATHLETE PROFILE:\n- José, 5'10", ~175lbs, ~15% body fat. Goal: reach 11-12% BF.\n- Busy dad (4 kids). Trains at 5:30am. Coach Francisco Jara's hypertrophy program: 3 exercises/day, train to failure.\n- Weekly split: Mon Legs, Tue Push, Wed Arms/Pull-ups, Thu Pull, Fri rest or FTP, Sat outdoor cycling, Sun rest.\n- Wahoo KICKR + Roovy for indoor. Biggest challenges: late-night sugar cravings, Netflix-induced sleep debt (<7hrs), vacation setbacks.\n- Eats eggs, chicken, red meat, Greek yogurt. Protein target: 175g/day.\n- Historical pattern: when sleep < 7h or HRV drops below 25ms, performance suffers next session.\n\n${histCtx}\n${progCtx}\n\nTODAY (${new Date().toISOString().split('T')[0]}):\n- Recovery: ${recovery}% → ${tier}\n- HRV: ${hrv || 'not provided'}ms\n- Resting HR: ${rhr || 'not provided'}bpm\n- Sleep: ${sleep || 'not provided'}h\n- Sleep performance: ${sleep_perf || 'not provided'}%\n- Strain (yesterday): ${strain || 'not provided'}\n- Planned session: ${SESSION_NAMES[session_type] || session_type}\n- Notes: "${notes || 'none'}"\n\nWrite a sharp, personal coaching note (130–160 words). Three tight paragraphs:\n1. What today's numbers mean — compare to his recent trend if you see a pattern worth calling out\n2. How to execute today's session given this recovery (be specific: RPE, rest periods, which exercises to protect or push)\n3. One concrete nutrition or sleep action for tonight that targets his biggest weakness\n\nTone: direct, warm, like a coach who knows him well. Use "José" once. No headers, no bullets. Reference specific numbers.`;
 
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await ai().messages.create({
       model: AI_MODEL, max_tokens: 512,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -554,7 +680,7 @@ app.post('/api/weekly', requireAuth, async (req, res) => {
   const { progCtx } = await buildCoachingContext();
 
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await ai().messages.create({
       model: AI_MODEL, max_tokens: 600,
       messages: [{ role: 'user', content: `Weekly coaching report for José (5'10", ~175lbs, goal 11-12% BF, busy dad training at 5:30am).\n\nWEEK DATA:\n${dataStr}\nAvg recovery: ${avg}%  |  Green days: ${greenDays}/7\n${progCtx}\n\nWrite a 200-word report (flowing paragraphs, no headers): recovery trend + what it means, training quality, one thing he did well, one specific thing to fix, next week's priority. Be specific with numbers.` }],
     });
@@ -589,7 +715,7 @@ app.post('/api/cycling', requireAuth, async (req, res) => {
   const latest = latestRes.rows[0] || null;
 
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await ai().messages.create({
       model: AI_MODEL, max_tokens: 500,
       messages: [{ role: 'user', content: `Cycling coach for José. Recreational cyclist improving Saturday outdoor performance. Wahoo KICKR + Roovy. ${ftp ? 'FTP: ' + ftp + 'w.' : 'No FTP tested yet.'} ${latest ? 'Latest recovery: ' + latest.recovery + '%.' : ''}\n\n${stravaCtx}\n\nSaturday ride just completed: ${dist || '?'}km, ${dur || '?'}min, avg HR ${hr || '?'}bpm, ${elev || '?'}m elevation, felt: ${feel}.\n\nDesign 2 indoor sessions (Wednesday easy + Friday structured). Each: duration, type, specific intervals with HR zone or watt target, session goal. Practical. 180 words max.` }],
     });
@@ -614,7 +740,7 @@ app.post('/api/nutrition', requireAuth, async (req, res) => {
   const availLabel = { home: 'cooking at home', restaurant: 'eating out', mixed: 'mix of home and eating out' }[available] || available;
 
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await ai().messages.create({
       model: AI_MODEL, max_tokens: 600,
       system: 'Return only a valid JSON array. No markdown fences, no explanation, no extra text.',
       messages: [{ role: 'user', content: `Meal plan for José. ${t.cals} cal ${day_type} day. Target: 175g protein. ${availLabel}. Foods he eats: eggs, chicken, red meat (steak/ground beef), Greek yogurt, rice, oats, fruit. ${latest ? 'Recovery today: ' + latest.recovery + '%.' : ''} Late-night cravings are his biggest risk — the evening snack must be planned.\n\nReturn JSON array of 5 meals: [{time: "7:00 AM", name: "...", foods: "...", protein: 40}]\nMeals must total ~175g protein. Be specific with portions.` }],
@@ -649,4 +775,17 @@ app.get('/api/progress', requireAuth, async (req, res) => {
 
 // ─── START ────────────────────────────────────────────────────────
 await bootstrapStrava();
-app.listen(PORT, () => console.log(`Performance OS v2 running on port ${PORT}`));
+app.listen(PORT, () => {
+  const url = `http://localhost:${PORT}`;
+  console.log('');
+  console.log('  Performance OS v2');
+  console.log(`  → ${url}`);
+  console.log(`  config: ${loadedEnvFrom ? `loaded from ${loadedEnvFrom}` : 'NO .env FILE FOUND'}`);
+  if (isConfigured()) {
+    console.log('  status: ready');
+  } else {
+    console.log(`  status: NOT CONFIGURED — missing ${missingKeys().join(', ')}`);
+    console.log(`  fix:    open ${url}/setup.html and paste your keys`);
+  }
+  console.log('');
+});
