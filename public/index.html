@@ -573,13 +573,42 @@ async function submitPin() {
 }
 
 let cachedHistory = [], cachedProgress = [];
+const OAUTH_ERRORS = {
+  invalid_state: 'WHOOP rejected the security token. Restart the server and try again.',
+  state_mismatch: 'The connection link expired or was reused. Click connect again.',
+  invalid_client: 'WHOOP rejected the Client ID or Secret. Check them at /setup.html.',
+  access_denied: 'You declined access at the provider.',
+  whoop_token_failed: 'WHOOP would not issue a token. Verify the redirect URL is registered in the WHOOP portal.',
+  strava_token_failed: 'Strava would not issue a token. Check your Strava credentials.',
+  whoop_exception: 'Could not reach WHOOP. Check your internet connection.',
+  strava_exception: 'Could not reach Strava. Check your internet connection.',
+};
+function describeOAuthError(code) { return OAUTH_ERRORS[code] || `Connection failed: ${code}`; }
+
+function showBanner(msg, kind) {
+  let el = document.getElementById('appBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'appBanner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:13px 18px;font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;text-align:center;cursor:pointer';
+    el.onclick = () => el.remove();
+    document.body.appendChild(el);
+  }
+  const ok = kind === 'ok';
+  el.style.background = ok ? '#14532d' : '#7f1d1d';
+  el.style.color = ok ? '#bbf7d0' : '#fecaca';
+  el.textContent = msg + '   (tap to dismiss)';
+  if (ok) setTimeout(() => el.remove(), 4000);
+}
+
 window.onload = async () => {
   const d = new Date();
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   document.getElementById('dateChip').textContent = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
   document.getElementById('iSession').value = ['rest','legs','push','arms','pull','ftp','cycling'][d.getDay()];
   const params = new URLSearchParams(location.search);
-  if (params.get('connected')) history.replaceState({}, '', '/');
+  if (params.get('connected')) { showBanner(`${params.get('connected').toUpperCase()} connected`, 'ok'); history.replaceState({}, '', '/'); }
+  if (params.get('error')) { showBanner(describeOAuthError(params.get('error')), 'bad'); history.replaceState({}, '', '/'); }
   if (SESSION_TOKEN) { try { await api('GET', '/api/status'); document.getElementById('pinScreen').style.display = 'none'; initApp(); } catch {} }
 };
 

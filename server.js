@@ -280,6 +280,21 @@ async function bootstrapStrava() {
 }
 
 // ─── WHOOP OAUTH ──────────────────────────────────────────────────
+// WHOOP rejects a state shorter than 8 chars with error=invalid_state.
+const pendingStates = new Map();
+function issueState(provider) {
+  const state = crypto.randomBytes(16).toString('hex');
+  pendingStates.set(state, { provider, expires: Date.now() + 10 * 60_000 });
+  for (const [k, v] of pendingStates) if (v.expires < Date.now()) pendingStates.delete(k);
+  return state;
+}
+function consumeState(state, provider) {
+  const entry = pendingStates.get(state);
+  if (!entry) return false;
+  pendingStates.delete(state);
+  return entry.provider === provider && entry.expires >= Date.now();
+}
+
 function notConfigured(res, provider, keys) {
   return res.status(503).send(
     `<h2>${provider} is not configured</h2>` +
@@ -296,14 +311,15 @@ app.get('/api/whoop/connect', requireAuth, (req, res) => {
     redirect_uri: `${baseUrl()}/api/whoop/callback`,
     response_type: 'code',
     scope: 'read:recovery read:cycles read:sleep read:workout read:profile read:body_measurement offline',
-    state: 'whoop',
+    state: issueState('whoop'),
   });
   res.redirect(`https://api.prod.whoop.com/oauth/oauth2/auth?${params}`);
 });
 
 app.get('/api/whoop/callback', async (req, res) => {
-  const { code, error } = req.query;
-  if (error) return res.redirect(`/?error=${error}`);
+  const { code, error, state } = req.query;
+  if (error) return res.redirect(`/?error=${encodeURIComponent(error)}`);
+  if (!consumeState(state, 'whoop')) return res.redirect('/?error=state_mismatch');
   try {
     const r = await fetch('https://api.prod.whoop.com/oauth/oauth2/token', {
       method: 'POST',
@@ -386,13 +402,15 @@ app.get('/api/strava/connect', requireAuth, (req, res) => {
     response_type: 'code',
     scope: 'read,activity:read_all',
     approval_prompt: 'auto',
+    state: issueState('strava'),
   });
   res.redirect(`https://www.strava.com/oauth/authorize?${params}`);
 });
 
 app.get('/api/strava/callback', async (req, res) => {
-  const { code, error } = req.query;
-  if (error) return res.redirect(`/?error=${error}`);
+  const { code, error, state } = req.query;
+  if (error) return res.redirect(`/?error=${encodeURIComponent(error)}`);
+  if (!consumeState(state, 'strava')) return res.redirect('/?error=state_mismatch');
   try {
     const r = await fetch('https://www.strava.com/oauth/token', {
       method: 'POST',
